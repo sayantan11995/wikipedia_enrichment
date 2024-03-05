@@ -8,6 +8,8 @@ import math
 import re
 import textstat
 from nltk.tokenize import sent_tokenize
+from bs4 import BeautifulSoup
+import requests
 
 topN = 10
 
@@ -147,6 +149,43 @@ def create_representative_doc(corpus, query):
     
 
 
+def FetchParagraphBetweenIds(id1, id2, bs_object):
+    hElem = bs_object.find("span", {'id': id1})
+    endElem = bs_object.find('span', {'id': id2})
+    cntns = list(bs_object.find_all())
+
+    my_lst = []
+    inBetween = False
+    for tag in cntns:
+        if tag == hElem:
+            inBetween = True
+        if inBetween == True and tag.name == 'p':
+            my_lst.append(tag.get_text())
+        if tag == endElem:
+            inBetween = False
+            break
+    return "".join(my_lst)
+
+def get_wikipedia_content(wiki_url):
+    headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.102 Safari/537.36'}
+    response = requests.get(wiki_url, headers=headers)
+    #print(response.status_code)
+    soup = BeautifulSoup(response.content, 'html.parser')
+
+    wikipedia_section_names = []
+    non_relevant_sections = ["See_also", "References", "Footnotes", "External_links", "Notes", "Bibliography", "Further_reading"]
+    for link in soup.find_all('span', attrs={'class':'mw-headline'}):
+        if link.get('id') is not None and link.get('id') not in non_relevant_sections:
+            wikipedia_section_names.append(link.get('id'))
+    print(wikipedia_section_names)
+
+    section_id_to_section_content = {}
+    for i in range(len(wikipedia_section_names)-1):
+        section_id_to_section_content[wikipedia_section_names[i]] = FetchParagraphBetweenIds(wikipedia_section_names[i], wikipedia_section_names[i+1], soup)
+    
+    return  section_id_to_section_content
+
+
 def calculate_quality(text):
     # Informativeness
     num_characters = len(text)
@@ -185,3 +224,24 @@ def calculate_quality(text):
             "understandability": understandability,
             "readability": readability,
             "quality": quality}
+
+
+def run_rag(retrievalQA, query):
+    # print(f"Query: {query}\n")
+    result = retrievalQA.run(query)
+    # print("\nResult: ", result)
+    return result
+
+def format_docs(docs):
+    return "\n\n".join(doc.page_content for doc in docs)
+
+def calculate_similarity(sentence_transformer_model, text1, text2):
+
+    # Compute embedding for both lists
+    embeddings1 = sentence_transformer_model.encode(text1, convert_to_tensor=True)
+    embeddings2 = sentence_transformer_model.encode(text2, convert_to_tensor=True)
+
+    # Compute cosine-similarities
+    cosine_scosimilarity_scoreres = util.cos_sim(embeddings1, embeddings2)[0][0].item()
+
+    return cosine_scosimilarity_scoreres

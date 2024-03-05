@@ -20,6 +20,9 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 from sentence_transformers import SentenceTransformer, util
 from sklearn.metrics.pairwise import cosine_similarity
 
+import utils
+import collections
+
 
 with open("config.json", "r") as content:
     config = json.load(content)
@@ -31,6 +34,16 @@ book = config.get("book")
 output_json = "output_json"
 dir_path = rf"books/{book}/part"
 rootdir = rf"books/{book}/"
+wiki_url = book_config.get(book).get("wikipedia_link")
+person = book.replace("_", " ")
+
+
+# Opening JSON file
+f = open(rf"{output_json}/{book}/mp_bert.json", 'r')
+# returns JSON object as a dictionary
+mp_bert = json.load(f)
+
+print(book)
 
 Path(rf"{output_json}/{book}").mkdir(parents=True, exist_ok=True)
 
@@ -86,18 +99,6 @@ qa = RetrievalQA.from_chain_type(
     verbose=True
 )
 
-def run_my_rag(qa, query):
-    # print(f"Query: {query}\n")
-    result = qa.run(query)
-    # print("\nResult: ", result)
-    return result
-
-import collections
-# Opening JSON file
-f = open(rf"{output_json}/{book}/mp_bert.json", 'r')
-
-# returns JSON object as a dictionary
-mp_bert = json.load(f)
 
 # target_keywords =[]
 # for key in keyword_dict.keys():
@@ -141,23 +142,12 @@ keywords = {}
 for idx, keyword in enumerate(keyword_to_chap.keys()):
     keywords[idx] = keyword
 
-with open(f"keywords.json", "w") as content:
+with open(f"{output_json}/{book}/keywords.json", "w") as content:
     json.dump(keywords, content)
 
 
 
 sentence_transformer_model = SentenceTransformer("all-MiniLM-L6-v2")
-
-def calculate_similarity(text1, text2):
-
-    # Compute embedding for both lists
-    embeddings1 = sentence_transformer_model.encode(text1, convert_to_tensor=True)
-    embeddings2 = sentence_transformer_model.encode(text2, convert_to_tensor=True)
-
-    # Compute cosine-similarities
-    cosine_scosimilarity_scoreres = util.cos_sim(embeddings1, embeddings2)[0][0].item()
-
-    return cosine_scosimilarity_scoreres
 
 
 langchain.debug=False
@@ -168,21 +158,41 @@ paragraphs = {}
 person = book.replace("_", " ")
 for idx, keyword in keywords.items():
     print(keyword)
-    count=count+1
-    query = f"You are an expert in writing Wikipedia articles on personalities from the information given to you about them and you want to write a Wikipedia article about {person}. Write a paragraph of at least 3-4 lines related to the keyword {keyword} which will give more information about {person}. DO NOT use any external information."
+    # query = f"You are an expert in writing Wikipedia articles on personalities from the information given to you about them and you want to write a Wikipedia article about {person}. Write a paragraph of at least 3-4 lines related to the keyword {keyword} which will give more information about {person}. DO NOT use any external information."
 
-    # Assuming run_my_rag is a function that generates the paragraph
-    generated_paragraph = run_my_rag(qa, query)
+    # # Assuming run_my_rag is a function that generates the paragraph
+    # generated_paragraph = utils.run_rag(qa, query)
+
+    query_stage_1 = f"""You are an AI assistant in writing Wikipedia articles on personalities and your task is to write the most relevant and a coherent brief paragraph about the given keyphrase. Write a brief paragraph of 3-4 lines related to the keyword {keyword} which will give more information about {person}.  DO NOT use any external information.
+    
+    Keyword: "{keyword}"
+    
+    Related paragraph: """
+
+    result = qa({"query": query_stage_1})
+
+
+    ## Using the retrieved document as context to query the LLM 
+    context = utils.format_docs(result.get("source_documents", []))
+    query_stage_2 = f"""You are an AI assistant in writing Wikipedia articles on personalities and your task is to write the most relevant and a coherent brief paragraph about the given keyphrase. Write a brief paragraph of 3-4 lines related to the keyword {keyword} which will give more information about {person}.  DO NOT use any external information.
+    
+    context: "{context}"
+
+    Keyword: "{keyword}"
+    
+    Related paragraph: """
+
+    generated_paragraph = llm(query_stage_2)
 
     print(generated_paragraph)
-    kw_para_sim_score = calculate_similarity(generated_paragraph, keyword)
+    kw_para_sim_score = utils.calculate_similarity(sentence_transformer_model, generated_paragraph, keyword)
     print(kw_para_sim_score)
 
     scored_mp_key_doc[idx] = [generated_paragraph, kw_para_sim_score, idx]
     paragraphs[idx] = generated_paragraph
 
-with open(rf"scored_mp_key_doc.json", "w") as outfile:
+with open(rf"{output_json}/{book}/scored_mp_key_doc.json", "w") as outfile:
     json.dump(scored_mp_key_doc, outfile)
 
-with open(f"paragraphs.json", "w") as content:
+with open(f"{output_json}/{book}/paragraphs.json", "w") as content:
     json.dump(paragraphs, content)
