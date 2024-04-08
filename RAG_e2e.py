@@ -5,6 +5,7 @@ from langchain import PromptTemplate, LLMChain
 from pathlib import Path
 import langchain
 import json
+import shutil
 import chromadb
 from chromadb.config import Settings
 from langchain.llms import HuggingFacePipeline
@@ -14,6 +15,7 @@ from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.chains import RetrievalQA
 from langchain.vectorstores import Chroma
 from langchain.document_loaders import DirectoryLoader
+from tqdm import tqdm
 
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 
@@ -30,27 +32,32 @@ with open("book_config.json", "r") as content:
     book_config = json.load(content)
 
 book = config.get("book")
+book_path = config.get("book_path") # whether to choose tesseract or langchain OCR
 output_json = "output_json"
-dir_path = rf"books/{book}/part"
-rootdir = rf"books/{book}/"
+dir_path = rf"books/{book_path}/{book}/part"
+rootdir = rf"books/{book_path}/{book}/"
 wiki_url = book_config.get(book).get("wikipedia_link")
 person = book.replace("_", " ")
 
 print(book)
+print(rootdir)
 
 Path(rf"{output_json}/{book}").mkdir(parents=True, exist_ok=True)
 
-loader = DirectoryLoader(rootdir, glob="**/*.txt", loader_cls=TextLoader, loader_kwargs={"encoding": "utf-8"})
+loader = DirectoryLoader(rootdir, glob="*.txt", loader_cls=TextLoader, loader_kwargs={"encoding": "utf-8"})
 data=loader.load()
 
 #######################
-text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200, separators=["\n\n", "\n", " ", "."],)
 all_splits = text_splitter.split_documents(data)
 model_name = "sentence-transformers/all-mpnet-base-v2"
 model_kwargs = {"device": "cuda"}
 embeddings = HuggingFaceEmbeddings(model_name=model_name, model_kwargs=model_kwargs)
 #######################
+print(all_splits[0])
+print("()"*50)
 
+shutil.rmtree("chroma_db")
 vectordb = Chroma.from_documents(documents=all_splits, embedding=embeddings, persist_directory="chroma_db")
 
 quantization_config = BitsAndBytesConfig(
@@ -61,7 +68,7 @@ quantization_config = BitsAndBytesConfig(
 )
 model_id = "mistralai/Mistral-7B-Instruct-v0.1"
 
-model_4bit = AutoModelForCausalLM.from_pretrained( model_id, device_map="auto",quantization_config=quantization_config, )
+model_4bit = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto", quantization_config=quantization_config, )
 tokenizer = AutoTokenizer.from_pretrained(model_id)
 
 
@@ -71,7 +78,7 @@ pipe = pipeline(
         tokenizer=tokenizer,
         use_cache=True,
         device_map="auto",
-        max_length=2000,
+        max_new_tokens=150,
         do_sample=True,
         top_k=5,
         num_return_sequences=1,
@@ -81,7 +88,7 @@ pipe = pipeline(
 llm = HuggingFacePipeline(pipeline=pipe)
 
 # Retriving Top n Chunks most Similar to query.
-retriever = vectordb.as_retriever(search_kwargs={"k": 2})
+retriever = vectordb.as_retriever(search_kwargs={"k": 3})
 
 #######################
 qa = RetrievalQA.from_chain_type(
@@ -104,22 +111,27 @@ def format_docs(docs):
 wikipedia_content = utils.get_wikipedia_content(wiki_url)
 
 generated_content = {}
-for section_name, section_content in wikipedia_content.items():
+for section_name, section_content in tqdm(wikipedia_content.items()):
 
-    query_stage_1 = f"""You are an AI assistant in writing Wikipedia articles on personalities and your task is to expand the existing content of the given Wikipedia section about the personality: "{person}" from the source documents. Can you add 3-4 most relevant sentences to the existing content? DO NOT use any external information.
+    print(f"Processig section: {section_name}")
+    # query_stage_1 = f"""You are an AI assistant in writing Wikipedia articles on personalities and your task is to expand the existing content of the given Wikipedia section about the personality: "{person}" from the source documents. Can you add 3-4 most relevant sentences to the existing content? DO NOT use any external information.
     
-    Existing content: "{section_content}"
+    # Existing content: "{section_content}"
     
-    New relevant sentences: """
+    # New relevant sentences: """
 
-    result = qa({"query": query_stage_1})
+    query_stage_1 = f"""{section_name}: {section_name}"""
+
+    # result = qa({"query": query_stage_1})
 
 
     ## Using the retrieved document as context to query the LLM 
-    context = format_docs(result.get("source_documents", []))
-    query_stage_2 = f"""You are an AI assistant in writing Wikipedia articles on personalities and your task is to expand the existing content of the given Wikipedia section about the personality: "{person}" from the given context. Using the context generate a coherent, insightful and neutral expansion of the existing content. STRCTLY Do not generate more than 4 sentences. If it is not possible to expand the content from the context, say so.
+    # context = format_docs(result.get("source_documents", []))
+    context = "\n".join([doc.page_content for doc in retriever.get_relevant_documents(query_stage_1)])
 
-    context: "{context}"
+    query_stage_2 = f"""You are an AI assistant in writing Wikipedia articles on personalities and your task is to expand the existing content of the given Wikipedia section about the personality: "{person}" from the given context. Using the context generate a coherent, insightful and neutral expansion of the existing content. DO NOT use any external information. If it is not possible to expand the content from the context, say so.
+
+    Context: "{context}"
 
     Existing content: "{section_name}: {section_content}"
 
@@ -138,6 +150,8 @@ old_wikipedia_content = " ".join(wikipedia_content.values())
 
 text = ""
 for section_name, text in generated_content.items():
+    print(f"Section: {section_name}")
+    print("Generated content: ")
     print(text)
     print("="*20)
     if "not possible" not in text.lower():
