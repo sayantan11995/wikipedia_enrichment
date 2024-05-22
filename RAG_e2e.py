@@ -57,7 +57,7 @@ embeddings = HuggingFaceEmbeddings(model_name=model_name, model_kwargs=model_kwa
 print(all_splits[0])
 print("()"*50)
 
-shutil.rmtree("chroma_db")
+shutil.rmtree("chroma_db", ignore_errors=True)
 vectordb = Chroma.from_documents(documents=all_splits, embedding=embeddings, persist_directory="chroma_db")
 
 quantization_config = BitsAndBytesConfig(
