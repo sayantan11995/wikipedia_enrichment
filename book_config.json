@@ -143,26 +143,10 @@
         "start_date": 1600,
         "end_date": 2023
     },
-    "John_Hall": {
-        "book_name": "",
-        "book_type": "",
-        "wikipedia_link": "https://en.wikipedia.org/wiki/John_Hall",
-        "category": "",
-        "start_date": 1600,
-        "end_date": 2023
-    },
     "Jerome": {
         "book_name": "",
         "book_type": "",
         "wikipedia_link": "https://en.wikipedia.org/wiki/Jerome",
-        "category": "",
-        "start_date": 1600,
-        "end_date": 2023
-    },
-    "Erich_Honecker": {
-        "book_name": "",
-        "book_type": "",
-        "wikipedia_link": "https://en.wikipedia.org/wiki/Erich_Honecker",
         "category": "",
         "start_date": 1600,
         "end_date": 2023
