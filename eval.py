@@ -8,6 +8,7 @@ import json
 import collections
 import glob
 import json
+from sentence_transformers import SentenceTransformer
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -68,15 +69,14 @@ def FetchParagraphBetweenIds(id1,id2):
             break
     return "".join(my_lst)
 
-section_id_to_section_content = {}
+original_wikipedia_content = {}
 for i in range(len(desired_ids)-1):
-    section_id_to_section_content[desired_ids[i]] = FetchParagraphBetweenIds(desired_ids[i], desired_ids[i+1])
+    original_wikipedia_content[desired_ids[i]] = FetchParagraphBetweenIds(desired_ids[i], desired_ids[i+1])
 
-
-old_wikipedia_content = " ".join(section_id_to_section_content.values())
 
 
 text = ""
+generated_content  = {}
 for items in top_section_keywords_mapping:
     text = keyword_paragraph_map[str(items[1])]
     section_id = str(items[0])
@@ -87,19 +87,14 @@ for items in top_section_keywords_mapping:
     text = text.replace("‘", "'")
     text = text.replace("”", "'")
     text = text.replace("“", "'")
-    section_id_to_section_content[section_id] += text
+
+    generated_content[section_id] = text
+    # section_id_to_section_content[section_id] += text
 
     print("="*50)
     print(str(items[2]))
     print(text)
 
-updated_wikipedia_content = " ".join(section_id_to_section_content.values())
-
-
-old_score = utils.calculate_quality(old_wikipedia_content)
-updated_score = utils.calculate_quality(updated_wikipedia_content)
-
-# Calculate the difference between corresponding values
-difference_dict = {key: updated_score[key] - old_score[key] for key in old_score}
+difference_dict = utils.evaluation(original_wikipedia_content, generated_content, sentence_transformers_model=SentenceTransformer("sentence-transformers/all-mpnet-base-v2"))
 
 print(difference_dict)

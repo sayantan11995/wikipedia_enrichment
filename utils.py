@@ -1,4 +1,5 @@
 from keyphrase_vectorizers import KeyphraseCountVectorizer, KeyphraseTfidfVectorizer
+from unsloth.chat_templates import get_chat_template
 from keybert import KeyBERT
 import yake
 from rakun2 import RakunKeyphraseDetector
@@ -10,6 +11,8 @@ import textstat
 from nltk.tokenize import sent_tokenize
 from bs4 import BeautifulSoup
 import requests
+from nltk import word_tokenize
+from nltk.util import ngrams
 
 topN = 10
 
@@ -96,8 +99,8 @@ embedder.to("cuda")
 #         return (paragraph, 0)
     
 
-from sgnlp.models.coherence_momentum import CoherenceMomentumModel, CoherenceMomentumConfig, \
-    CoherenceMomentumPreprocessor
+# from sgnlp.models.coherence_momentum import CoherenceMomentumModel, CoherenceMomentumConfig, \
+#     CoherenceMomentumPreprocessor
 
 # # Load Model
 # model_path = "./CoherenceMomentumModel"
@@ -235,6 +238,42 @@ def run_rag(retrievalQA, query):
 def format_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs)
 
+def generate_text_using_llama3(model, tokenizer, messages ):
+    """
+    
+    messages: [
+            {"from": "human", "value": query},
+        ]
+    """
+
+    tokenizer = get_chat_template(
+                    tokenizer,
+                    chat_template = "llama-3", # Supports zephyr, chatml, mistral, llama, alpaca, vicuna, vicuna_old, unsloth
+                    mapping = {"role" : "from", "content" : "value", "user" : "human", "assistant" : "gpt"}, # ShareGPT style
+                )
+
+    input_ids = tokenizer.apply_chat_template(
+        messages,
+        tokenize = True,
+        add_generation_prompt = True, # Must add for generation
+        return_tensors = "pt",
+    ).to("cuda")
+
+    outputs = model.generate(
+        input_ids=input_ids,
+        max_new_tokens=250,
+        # eos_token_id=terminators,
+        do_sample=True,
+        temperature=0.7,
+        top_p=0.9,
+    )
+
+    response = outputs[0][input_ids.shape[-1]:]
+    outputs = tokenizer.batch_decode(response, skip_special_tokens=True)
+    generated_text = "".join(outputs)
+
+    return generated_text
+
 def calculate_similarity(sentence_transformer_model, text1, text2):
 
     # Compute embedding for both lists
@@ -245,3 +284,74 @@ def calculate_similarity(sentence_transformer_model, text1, text2):
     cosine_scosimilarity_scoreres = util.cos_sim(embeddings1, embeddings2)[0][0].item()
 
     return cosine_scosimilarity_scoreres
+
+def jaccard_similarity(text1, text2):
+    # Tokenize the texts into sets of words
+    set1 = set(text1.lower().split())
+    set2 = set(text2.lower().split())
+    
+    # Calculate the intersection and union
+    intersection = set1.intersection(set2)
+    union = set1.union(set2)
+    
+    # Calculate Jaccard similarity
+    jaccard_sim = len(intersection) / len(union)
+    
+    return jaccard_sim
+
+def evaluation(original_wikipedia_content, generated_content, sentence_transformers_model):
+
+    old_wikipedia_content = " ".join(original_wikipedia_content.values())
+
+
+    calibrated_ratio = []
+
+    text = ""
+    for section_name, text in generated_content.items():
+
+        unable_to_generate = False
+        for impossible_terms in ["I cannot generate", "impossible to generate", "not possible", "unable to generate", "not enough information", "impossible to expand"]:
+            if impossible_terms in text.lower():
+                unable_to_generate = True
+                break
+        if not unable_to_generate:
+            
+
+            existing_section_words = original_wikipedia_content[section_name].lower().split()
+            new_words = text.lower().split()
+            # new_word_ratio = 1 - (len(set(existing_section_words).intersection(set(new_words))) / len(set(new_words)))
+
+            new_word_ratio = len(set(new_words) - set(existing_section_words)) / len(new_words)
+
+            print(len(set(new_words) - set(existing_section_words)), len(new_words))
+
+            from parascore import ParaScorer
+            scorer = ParaScorer(lang="en", model_type = 'bert-base-uncased')
+            cands = [text.lower()]
+            sources = [original_wikipedia_content[section_name].lower()] 
+            score = scorer.free_score(cands, sources, batch_size=16)[0][0].detach().cpu().numpy()
+
+            
+            
+
+            continuation_score = calculate_similarity(sentence_transformers_model, original_wikipedia_content[section_name], text)
+
+            print(continuation_score)
+
+            calibrated_ratio.append((new_word_ratio)* continuation_score)
+
+            original_wikipedia_content[section_name] += text
+
+    print(calibrated_ratio)
+
+    updated_wikipedia_content = " ".join(original_wikipedia_content.values())
+
+    old_score = calculate_quality(old_wikipedia_content)
+    updated_score = calculate_quality(updated_wikipedia_content)
+
+    # Calculate the difference between corresponding values
+    difference_dict = {key: updated_score[key] - old_score[key] for key in old_score}
+
+    difference_dict['informativeness'] *= (sum(calibrated_ratio)/len(calibrated_ratio))
+
+    return difference_dict
