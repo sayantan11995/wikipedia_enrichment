@@ -1,1 +1,1 @@
-Codebase for the paper: ![REVerSum: A Multi-staged Retrieval-Augmented Generation Method to Enhance Wikipedia Tail Biographies through Personal Narratives](https://aclanthology.org/2025.coling-industry.61) 
+Codebase for the paper: [REVerSum: A Multi-staged Retrieval-Augmented Generation Method to Enhance Wikipedia Tail Biographies through Personal Narratives](https://aclanthology.org/2025.coling-industry.61) 
