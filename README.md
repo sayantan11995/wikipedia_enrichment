@@ -72,7 +72,7 @@ pip install -r requirements.txt
 ---
 
 ## 👥 Authors
-* Sayantan Adak
+* [Sayantan Adak](https://scholar.google.com/citations?user=lQqDURYAAAAJ&hl=en)
 * Pauras Mangesh Meher
 * Paramita Das
 * Animesh Mukherjee
